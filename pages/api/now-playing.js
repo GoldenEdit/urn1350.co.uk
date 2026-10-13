@@ -23,7 +23,6 @@ function emptyPayload() {
     runtime: '',
     text: '',
     artwork: '',
-    artworkChecked: false,
     updatedAt: null,
     changedAt: null,
     history: [],
@@ -200,7 +199,6 @@ function normalizeBody(body = {}, previous = null) {
     runtime,
     text: toText(artist, title),
     artwork: '',
-    artworkChecked: false,
     updatedAt: now,
     // Only reset the staleness clock when the track itself changes.
     changedAt:
@@ -222,18 +220,6 @@ export default async function handler(req, res) {
 
     if (isStale(data)) {
       return res.status(200).json(emptyPayload());
-    }
-
-    // Backfill art for tracks stored without it (written by a deploy that predates
-    // artwork, or after a failed lookup). Checked once per track so polls stay cheap.
-    if (!data.artwork && !data.artworkChecked && (data.artist || data.title)) {
-      data.artwork = (await findArtwork(data.artist, data.title)) || '';
-      data.artworkChecked = true;
-      try {
-        await writeStored(data);
-      } catch (error) {
-        console.error('Error saving backfilled artwork:', error.message);
-      }
     }
 
     return res.status(200).json({
@@ -275,13 +261,9 @@ export default async function handler(req, res) {
     // Look art up once per track change; repeat POSTs of the same track reuse it.
     const sameTrack =
       previous.artist === payload.artist && previous.title === payload.title;
-    if (sameTrack && (previous.artwork || previous.artworkChecked)) {
-      payload.artwork = previous.artwork || '';
-      payload.artworkChecked = true;
-    } else {
-      payload.artwork = (await findArtwork(payload.artist, payload.title)) || '';
-      payload.artworkChecked = true;
-    }
+    payload.artwork = sameTrack
+      ? previous.artwork || ''
+      : (await findArtwork(payload.artist, payload.title)) || '';
 
     try {
       await writeStored(payload);
